@@ -1,0 +1,345 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Salto Orbital</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Chakra+Petch:wght@400;600&display=swap">
+<style>
+/* Layout: lienzo a pantalla completa, HUD flotante arriba, tarjetas centradas para inicio y fin. Un solo mundo visual oscuro, por elección. */
+:root{
+  --bg:#140b2e;
+  --nebula:#3b1a63;
+  --ink:#f4ecff;
+  --muted:#a99cc8;
+  --ice:#8ff3ff;
+  --sun:#ffb547;
+  --ember:#ff5e3a;
+  --font-display:"Dela Gothic One","Arial Black",Impact,sans-serif;
+  --font-ui:"Chakra Petch","Trebuchet MS",system-ui,sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-ui);-webkit-user-select:none;user-select:none;touch-action:manipulation}
+#stage{position:fixed;inset:0}
+canvas{display:block;width:100%;height:100%}
+.hud{position:fixed;top:env(safe-area-inset-top,0px);left:0;right:0;display:flex;justify-content:space-between;align-items:flex-start;padding:14px 16px;pointer-events:none}
+.score{font-family:var(--font-display);font-size:clamp(40px,9vw,64px);line-height:1;font-variant-numeric:tabular-nums;text-shadow:0 0 24px rgba(143,243,255,.35)}
+.side{display:flex;flex-direction:column;align-items:flex-end;gap:4px;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.side b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.combo{color:var(--sun)}
+.overlay{position:fixed;inset:0;display:grid;place-items:center;padding-inline:16px;pointer-events:none}
+.card{max-width:420px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px;padding:28px 24px;background:rgba(20,11,46,.72);border:1px solid rgba(143,243,255,.18);border-radius:18px;backdrop-filter:blur(6px)}
+.card h1{font-family:var(--font-display);font-weight:400;font-size:clamp(36px,10vw,56px);line-height:.95;margin:0;text-wrap:balance;background:linear-gradient(180deg,var(--ice),#c3a6ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.card h2{font-family:var(--font-display);font-weight:400;font-size:28px;margin:0;color:var(--sun)}
+.card p{margin:0;color:var(--muted);font-size:15px;line-height:1.5;max-width:34ch}
+.big{font-family:var(--font-display);font-size:64px;line-height:1;color:var(--ink)}
+.key{display:inline-flex;align-items:center;gap:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;font-size:14px;color:var(--ink)}
+.cap{display:inline-block;min-width:150px;padding:10px 18px;border-radius:10px;background:linear-gradient(180deg,#2c1d55,#1d1240);border:1px solid rgba(244,236,255,.25);box-shadow:0 4px 0 #0a0518,0 0 24px rgba(143,243,255,.2);font-family:var(--font-ui);font-weight:600;letter-spacing:.3em;animation:pulse 1.4s ease-in-out infinite}
+.small{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.rules{display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--muted);text-align:left}
+.rules span b{color:var(--ink);font-weight:600}
+@keyframes pulse{50%{transform:translateY(2px);box-shadow:0 2px 0 #0a0518,0 0 34px rgba(143,243,255,.35)}}
+@media (prefers-reduced-motion:reduce){.cap{animation:none}}
+</style>
+
+<div id="stage"><canvas id="c" aria-label="Juego Salto Orbital"></canvas></div>
+
+<div class="hud">
+  <div class="score" id="score">0</div>
+  <div class="side">
+    <span>Récord <b id="best">0</b></span>
+    <span class="combo" id="combo" hidden></span>
+  </div>
+</div>
+
+<div class="overlay" id="menu">
+  <div class="card">
+    <h1>Salto Orbital</h1>
+    <div class="rules">
+      <span>Giras alrededor de un planeta. <b>Suelta en el momento justo</b> para saltar al siguiente.</span>
+      <span>Atraviesa el centro de un planeta para encadenar <b>combos</b>. Las estrellas dan <b>+3</b>.</span>
+      <span>No te quedes quieto: la <b>marea solar</b> sube desde abajo.</span>
+    </div>
+    <span class="cap">ESPACIO</span>
+    <span class="small">Es la única tecla · en el celular, toca la pantalla</span>
+  </div>
+</div>
+
+<div class="overlay" id="over" hidden>
+  <div class="card">
+    <h2 id="reason">La marea solar te alcanzó</h2>
+    <div class="big" id="final">0</div>
+    <span class="small" id="newbest">Récord: 0</span>
+    <span class="cap">ESPACIO</span>
+    <span class="small">para volver a despegar</span>
+  </div>
+</div>
+
+<script>
+(() => {
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const $ = id => document.getElementById(id);
+const elScore=$('score'), elBest=$('best'), elCombo=$('combo'), elMenu=$('menu'), elOver=$('over');
+const COLS=['#f2c14e','#7bd389','#ff8fab','#9aa9ff','#5ee0c1','#c792ea','#ff9f5a'];
+const GAP=18, LAUNCH=560;
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const rand=(a,b)=>a+Math.random()*(b-a);
+let W=0,H=0,DPR=1,PW=0,offX=0;
+
+function resize(){
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  W=cv.clientWidth; H=cv.clientHeight;
+  cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  PW=Math.min(W-32,480); offX=(W-PW)/2;
+  bgStars.forEach(s=>{s.x=Math.random()*W; s.y=Math.random()*H;});
+}
+const bgStars=Array.from({length:140},()=>({x:0,y:0,f:rand(.05,.45),r:rand(.4,1.6),tw:rand(0,6)}));
+addEventListener('resize',resize);
+
+let best=0; try{best=+localStorage.getItem('salto-orbital-best')||0}catch(e){}
+elBest.textContent=best;
+
+let state='menu', t=0, overAt=0;
+let planets=[], stars=[], parts=[], texts=[], trail=[];
+const P={mode:'orbit',p:null,a:0,dir:1,x:0,y:0,vx:0,vy:0,ft:0,from:-1};
+let score=0, combo=0, camY=0, tideY=0, shake=0, nextId=0, reason='';
+
+function craters(){return Array.from({length:3},()=>({a:rand(0,6.28),d:rand(.15,.6),s:rand(.12,.22)}))}
+
+function addPlanet(){
+  const last=planets[planets.length-1];
+  const lvl=score;
+  const r=rand(Math.max(15,30-lvl*.45),Math.max(22,44-lvl*.55));
+  const lo=offX+50, hi=offX+PW-50;
+  let x, tries=0; do{x=rand(lo,hi);tries++}while(Math.abs(x-last.bx)<80 && tries<20);
+  const y=last.y-rand(150,200+Math.min(70,lvl*2.5));
+  let amp=0;
+  if(lvl>3 && Math.random()<Math.min(.6,.15+lvl*.025)){amp=Math.min(rand(30,80),x-lo,hi-x); if(amp<20)amp=0;}
+  const p={x,bx:x,y,r,col:COLS[(Math.random()*COLS.length)|0],ring:Math.random()<.3,amp,ph:rand(0,6.28),sp:rand(.7,1.5),id:nextId++,cr:craters()};
+  planets.push(p);
+  if(Math.random()<.45) stars.push({x:(x+last.bx)/2+rand(-40,40),y:(y+last.y)/2+rand(-20,20),got:false,t:rand(0,6)});
+}
+
+function orbitPos(){const R=P.p.r+GAP; P.x=P.p.x+Math.cos(P.a)*R; P.y=P.p.y+Math.sin(P.a)*R;}
+
+function reset(){
+  planets=[];stars=[];parts=[];texts=[];trail=[];score=0;combo=0;shake=0;
+  const p0={x:W/2,bx:W/2,y:0,r:38,col:'#9aa9ff',ring:true,amp:0,ph:0,sp:1,id:nextId++,cr:craters()};
+  planets.push(p0);
+  for(let i=0;i<6;i++) addPlanet();
+  P.mode='orbit';P.p=p0;P.a=-Math.PI/2;P.dir=1;P.from=p0.id;orbitPos();
+  camY=P.y-H*.62; tideY=camY+H+40;
+  updateHud();
+}
+
+function updateHud(){
+  elScore.textContent=score;
+  elBest.textContent=best;
+  if(combo>1){elCombo.hidden=false;elCombo.textContent='Combo x'+combo}else elCombo.hidden=true;
+}
+
+/* ---------- sonido ---------- */
+let ac=null;
+function audio(){ if(!ac){ try{ac=new (window.AudioContext||window.webkitAudioContext)()}catch(e){} } if(ac&&ac.state==='suspended') ac.resume(); }
+function beep(f,d,type='sine',v=.06,slide){
+  if(!ac) return; const n=ac.currentTime, o=ac.createOscillator(), g=ac.createGain();
+  o.type=type; o.frequency.setValueAtTime(f,n); if(slide) o.frequency.exponentialRampToValueAtTime(slide,n+d);
+  g.gain.setValueAtTime(v,n); g.gain.exponentialRampToValueAtTime(.0001,n+d);
+  o.connect(g).connect(ac.destination); o.start(n); o.stop(n+d+.02);
+}
+
+/* ---------- acciones ---------- */
+function burst(x,y,col,n=16,sp=180){for(let i=0;i<n;i++){const a=rand(0,6.28),s=rand(sp*.3,sp);parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:rand(.4,.9),max:.9,col,r:rand(1.5,3.5)})}}
+function say(x,y,txt,col){texts.push({x,y,txt,col,life:1.1})}
+
+function launch(){
+  if(P.mode!=='orbit') return;
+  P.mode='fly'; P.ft=0;
+  P.vx=-Math.sin(P.a)*P.dir*LAUNCH; P.vy=Math.cos(P.a)*P.dir*LAUNCH;
+  beep(320,.18,'triangle',.05,720);
+}
+
+function capture(p){
+  const dx=P.x-p.x, dy=P.y-p.y, sp=Math.hypot(P.vx,P.vy);
+  const cross=dx*P.vy-dy*P.vx;
+  P.dir=cross>0?1:-1; P.a=Math.atan2(dy,dx); P.mode='orbit'; P.p=p;
+  if(p.id!==P.from){
+    const b=Math.abs(cross)/sp;
+    let gain=1;
+    if(b<p.r*.5){combo++; gain+=combo; say(p.x,p.y-p.r-30,combo>1?'¡Directo! x'+combo:'¡Directo!','#ffb547'); beep(520+combo*60,.22,'square',.035,1040+combo*80);}
+    else {combo=0; say(p.x,p.y-p.r-30,'+1','#f4ecff'); beep(440,.14,'sine',.06,660);}
+    score+=gain;
+    burst(P.x,P.y,p.col,14,160);
+  }
+  P.from=p.id;
+  orbitPos(); updateHud();
+}
+
+function gameOver(why){
+  if(state!=='play') return;
+  state='over'; overAt=t; reason=why; shake=reduce?0:14;
+  burst(P.x,P.y,'#8ff3ff',34,260); burst(P.x,P.y,'#ffb547',20,200);
+  beep(300,.6,'sawtooth',.05,60);
+  const isBest=score>best;
+  if(isBest){best=score;try{localStorage.setItem('salto-orbital-best',best)}catch(e){}}
+  $('reason').textContent=why; $('final').textContent=score;
+  $('newbest').textContent=isBest&&score>0?'¡Nuevo récord!':'Récord: '+best;
+  updateHud();
+  setTimeout(()=>{if(state==='over') elOver.hidden=false},650);
+}
+
+function action(){
+  audio();
+  if(state==='menu'){state='play';elMenu.hidden=true;reset();beep(392,.12,'triangle',.05,784);return}
+  if(state==='play'){launch();return}
+  if(state==='over' && t-overAt>.75){elOver.hidden=true;state='play';reset();beep(392,.12,'triangle',.05,784)}
+}
+addEventListener('keydown',e=>{if(e.code==='Space'||e.key===' '){e.preventDefault(); if(!e.repeat) action();}});
+cv.addEventListener('pointerdown',e=>{e.preventDefault();action()});
+elMenu.addEventListener('pointerdown',action); elOver.addEventListener('pointerdown',action);
+[elMenu,elOver].forEach(el=>el.style.pointerEvents='auto');
+
+/* ---------- lógica ---------- */
+function update(dt){
+  t+=dt;
+  for(const p of planets) if(p.amp) p.x=p.bx+Math.sin(t*p.sp+p.ph)*p.amp;
+
+  if(state==='play'){
+    if(P.mode==='orbit'){
+      const R=P.p.r+GAP, lin=Math.min(275,150+score*3.5);
+      P.a+=P.dir*lin/R*dt; orbitPos();
+    } else {
+      P.x+=P.vx*dt; P.y+=P.vy*dt; P.ft+=dt;
+      for(const s of stars) if(!s.got && Math.hypot(P.x-s.x,P.y-s.y)<22){
+        s.got=true; score+=3; burst(s.x,s.y,'#ffe08a',12,140); say(s.x,s.y-24,'+3','#ffe08a'); beep(880,.12,'sine',.05,1320); updateHud();
+      }
+      for(const p of planets){
+        if(p.id===P.from && P.ft<.3) continue;
+        if(Math.hypot(P.x-p.x,P.y-p.y)<p.r+GAP+10){capture(p);break}
+      }
+      if(P.mode==='fly' && (P.ft>1.9 || P.x<-40 || P.x>W+40 || P.y>camY+H+40)) gameOver('Te perdiste en el espacio');
+    }
+    tideY-=Math.min(85,24+score*1.4)*dt;
+    tideY=Math.min(tideY,camY+H+30);
+    if(state==='play' && P.y>tideY-6) gameOver('La marea solar te alcanzó');
+    camY+=(P.y-H*.62-camY)*Math.min(1,dt*3);
+    while(planets[planets.length-1].y>camY-H*.6) addPlanet();
+    planets=planets.filter(p=>p.y<tideY+160||p===P.p);
+    stars=stars.filter(s=>s.y<tideY+100&&!s.got);
+  } else if(state==='menu'){
+    if(!P.p) reset();
+    P.a+=1.8*dt; orbitPos();
+  }
+
+  if(state!=='over'){trail.push({x:P.x,y:P.y}); if(trail.length>22) trail.shift();}
+  else if(trail.length) trail.shift();
+
+  for(const q of parts){q.x+=q.vx*dt;q.y+=q.vy*dt;q.vx*=.96;q.vy*=.96;q.life-=dt}
+  parts=parts.filter(q=>q.life>0);
+  for(const x of texts){x.y-=40*dt;x.life-=dt}
+  texts=texts.filter(x=>x.life>0);
+  if(Math.random()<.5) parts.push({x:rand(0,W),y:tideY-rand(0,8),vx:rand(-20,20),vy:rand(-90,-30),life:rand(.4,1),max:1,col:Math.random()<.5?'#ffb547':'#ff5e3a',r:rand(1,2.4)});
+  shake*=Math.pow(.02,dt);
+}
+
+/* ---------- dibujo ---------- */
+function drawPlanet(p){
+  const sx=p.x, sy=p.y-camY;
+  if(p.ring){
+    ctx.save();ctx.translate(sx,sy);ctx.rotate(-.35);
+    ctx.strokeStyle=p.col;ctx.globalAlpha=.55;ctx.lineWidth=3;
+    ctx.beginPath();ctx.ellipse(0,0,p.r*1.7,p.r*.45,0,Math.PI,Math.PI*2);ctx.stroke();ctx.restore();
+  }
+  ctx.fillStyle=p.col;ctx.beginPath();ctx.arc(sx,sy,p.r,0,Math.PI*2);ctx.fill();
+  const g=ctx.createRadialGradient(sx-p.r*.4,sy-p.r*.45,p.r*.1,sx,sy,p.r);
+  g.addColorStop(0,'rgba(255,255,255,.45)');g.addColorStop(.5,'rgba(255,255,255,0)');g.addColorStop(1,'rgba(20,11,46,.45)');
+  ctx.fillStyle=g;ctx.beginPath();ctx.arc(sx,sy,p.r,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='rgba(20,11,46,.18)';
+  for(const c of p.cr){ctx.beginPath();ctx.arc(sx+Math.cos(c.a)*p.r*c.d,sy+Math.sin(c.a)*p.r*c.d,p.r*c.s,0,Math.PI*2);ctx.fill()}
+  if(p.ring){
+    ctx.save();ctx.translate(sx,sy);ctx.rotate(-.35);
+    ctx.strokeStyle=p.col;ctx.lineWidth=3;
+    ctx.beginPath();ctx.ellipse(0,0,p.r*1.7,p.r*.45,0,0,Math.PI);ctx.stroke();ctx.restore();
+  }
+}
+
+function draw(){
+  ctx.save();
+  if(shake>.3) ctx.translate(rand(-shake,shake),rand(-shake,shake));
+  ctx.fillStyle='#140b2e';ctx.fillRect(-20,-20,W+40,H+40);
+  const neb=ctx.createRadialGradient(W*.7,H*.25,0,W*.7,H*.25,Math.max(W,H)*.7);
+  neb.addColorStop(0,'rgba(59,26,99,.9)');neb.addColorStop(1,'rgba(20,11,46,0)');
+  ctx.fillStyle=neb;ctx.fillRect(0,0,W,H);
+
+  for(const s of bgStars){
+    const y=((s.y-camY*s.f)%H+H)%H;
+    ctx.globalAlpha=.4+.6*Math.abs(Math.sin(t*1.3+s.tw));
+    ctx.fillStyle='#f4ecff';ctx.fillRect(s.x,y,s.r,s.r);
+  }
+  ctx.globalAlpha=1;
+
+  // órbitas
+  ctx.setLineDash([3,7]);ctx.lineWidth=1.5;
+  for(const p of planets){
+    const cur=p===P.p&&P.mode==='orbit';
+    ctx.strokeStyle=cur?'rgba(143,243,255,.55)':'rgba(244,236,255,.13)';
+    ctx.beginPath();ctx.arc(p.x,p.y-camY,p.r+GAP,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // estrellas coleccionables
+  for(const s of stars){
+    const sx=s.x, sy=s.y-camY+Math.sin(t*2+s.t)*4, R=9, rot=t*1.5+s.t;
+    ctx.save();ctx.translate(sx,sy);ctx.rotate(rot);
+    ctx.fillStyle='#ffe08a';ctx.shadowColor='#ffb547';ctx.shadowBlur=14;
+    ctx.beginPath();for(let i=0;i<10;i++){const r=i%2?R*.45:R,a=i*Math.PI/5-Math.PI/2;ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r)}ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+
+  for(const p of planets) drawPlanet(p);
+
+  // estela y nave
+  for(let i=0;i<trail.length;i++){
+    const q=trail[i],k=i/trail.length;
+    ctx.fillStyle=`rgba(143,243,255,${k*.5})`;ctx.beginPath();ctx.arc(q.x,q.y-camY,1+k*5,0,Math.PI*2);ctx.fill();
+  }
+  if(state!=='over'){
+    ctx.shadowColor='#8ff3ff';ctx.shadowBlur=18;ctx.fillStyle='#e9fdff';
+    ctx.beginPath();ctx.arc(P.x,P.y-camY,7,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+  }
+
+  for(const q of parts){ctx.globalAlpha=Math.max(0,q.life/q.max);ctx.fillStyle=q.col;ctx.beginPath();ctx.arc(q.x,q.y-camY,q.r,0,Math.PI*2);ctx.fill()}
+  ctx.globalAlpha=1;
+
+  ctx.textAlign='center';ctx.font='600 18px "Chakra Petch", sans-serif';
+  for(const x of texts){ctx.globalAlpha=Math.min(1,x.life*1.5);ctx.fillStyle=x.col;ctx.fillText(x.txt,x.x,x.y-camY)}
+  ctx.globalAlpha=1;
+
+  // marea solar
+  const ty=tideY-camY;
+  if(ty<H+60){
+    const g=ctx.createLinearGradient(0,ty-40,0,ty+220);
+    g.addColorStop(0,'rgba(255,181,71,0)');g.addColorStop(.18,'rgba(255,181,71,.95)');g.addColorStop(.45,'#ff5e3a');g.addColorStop(1,'#7a1238');
+    ctx.fillStyle=g;ctx.beginPath();ctx.moveTo(0,H+30);
+    for(let x=0;x<=W+20;x+=20){const y=ty+Math.sin(x*.025+t*3)*6+Math.sin(x*.06-t*4.5)*3;ctx.lineTo(x,y)}
+    ctx.lineTo(W,H+30);ctx.closePath();ctx.fill();
+    ctx.fillStyle='rgba(255,181,71,.12)';ctx.fillRect(0,ty-60,W,60);
+  }
+
+  // pista inicial
+  if(state==='play' && score===0 && P.mode==='orbit'){
+    ctx.globalAlpha=.6+.4*Math.sin(t*4);ctx.fillStyle='#f4ecff';ctx.font='600 14px "Chakra Petch", sans-serif';
+    ctx.fillText('ESPACIO para saltar',W/2,H-40);ctx.globalAlpha=1;
+  }
+  ctx.restore();
+}
+
+let lastT=performance.now();
+function loop(now){
+  const dt=Math.min(.05,(now-lastT)/1000);lastT=now;
+  update(dt);draw();requestAnimationFrame(loop);
+}
+resize();reset();requestAnimationFrame(loop);
+})();
+</script>
+
+</body></html>
